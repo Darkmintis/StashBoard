@@ -27,7 +27,31 @@
     "url": "https://github.com/Darkmintis/StashBoard"
   },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "stashboard",
+          "title": "StashBoard",
+          "icon": "assets/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "stashboard": [
+        {
+          "type": "webview",
+          "id": "stashboard.board",
+          "name": "Stash Board",
+          "icon": "assets/icon.png",
+          "contextualTitle": "Stash Board"
+        }
+      ]
+    },
     "commands": [
+      {
+        "command": "stashboard.openBoard",
+        "title": "StashBoard: Open Board"
+      },
       {
         "command": "stashboard.save",
         "title": "StashBoard: Save Selected Files to Stash..."

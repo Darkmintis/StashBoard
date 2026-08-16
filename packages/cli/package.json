@@ -1,0 +1,31 @@
+{
+  "name": "@stashboard/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StashBoard CLI — named, safe stashes for unfinished git work.",
+  "bin": {
+    "git-stashboard": "dist/git-stashboard.js"
+  },
+  "main": "dist/git-stashboard.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@stashboard/core": "*",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

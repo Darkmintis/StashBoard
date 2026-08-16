@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import {
+  BoardConflictError,
   StashboardError,
   MixedStateError,
   RestoreConflictError,
@@ -11,11 +14,25 @@ import {
   addStash,
   readMetadata,
   removeStash,
+  upsertStash,
   writeMetadata,
 } from "./metadata";
 import {
+  buildStashCommit,
+  captureWorktreeEntry,
+  classifyForBoard,
+  composeStash,
+  entryAtPath,
+  locateInStash,
+  resolveStashAnatomy,
+  swapStash,
+  type EntryUpdate,
+  type StashAnatomy,
+} from "./board";
+import {
   gitCommonDir,
   gitVersion,
+  indexEntry,
   isInsideRepo,
   runGit,
   stashApply,
@@ -29,11 +46,16 @@ import {
 } from "./stashOps";
 import { classifyPath, collectWorkingTreeState } from "./validation";
 import type {
+  FileStateKind,
   MetadataFile,
   ReconcileResult,
   RestoreResult,
   Stash,
   StashEntry,
+  BoardFile,
+  BoardStashEntry,
+  BoardStashFile,
+  BoardView,
 } from "./types";
 
 const STASHBOARD_TOKEN = "stashboard:";
@@ -346,6 +368,234 @@ export class StashService {
   }
 
   // ---------------------------------------------------------------------------
+  // Stash Board operations
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Stage working changes of `path` (CHANGES → STAGED). Pure `git add`; the
+   * path must currently be unstaged or untracked.
+   */
+  async boardStage(path: string): Promise<void> {
+    const kind = await classifyForBoard(this.opts, path);
+    if (kind === "staged") return;
+    await runGit(this.opts.cwd, ["add", "--", path], this.opts.exec);
+  }
+
+  /**
+   * Move a path's working change into an existing stash (CHANGES → STASHES).
+   * The stash gains the path at the layer matching its current kind; the
+   * working-change copy is then reverted so the change lives only in the stash.
+   */
+  async boardAddToStash(nameOrId: string, path: string): Promise<void> {
+    const { anatomy } = await this.resolveBoardStash(nameOrId);
+    const kind = await classifyForBoard(this.opts, path);
+
+    const capture: EntryUpdate =
+      kind === "staged"
+        ? (await indexEntry(this.opts, path))!
+        : await captureWorktreeEntry(this.opts, path);
+
+    // Rebuild the stash with the path added to the right layer(s).
+    const worktree = new Map<string, EntryUpdate | null>();
+    const index = new Map<string, EntryUpdate | null>();
+    const untracked = new Map<string, EntryUpdate | null>();
+    switch (kind) {
+      case "untracked":
+        untracked.set(path, capture);
+        break;
+      case "staged":
+        // Staged files live in both the worktree tree (W) and the index tree (W^2).
+        worktree.set(path, capture);
+        index.set(path, capture);
+        break;
+      default:
+        worktree.set(path, capture);
+    }
+
+    const compose = {
+      anatomy,
+      worktree,
+      index,
+      untracked,
+    };
+    await composeStash(this.opts, compose);
+    await this.assimilateMetadata(anatomy.message);
+
+    // Revert the working-tree change now that a safe copy lives in the stash.
+    if (kind === "untracked") {
+      fs.rmSync(nodePath.resolve(this.opts.cwd, path), { force: true });
+    } else if (kind === "staged") {
+      // Staged: reset index + worktree back to HEAD.
+      await runGit(this.opts.cwd, ["reset", "-q", "--", path], this.opts.exec);
+      await runGit(this.opts.cwd, ["checkout", "--", path], this.opts.exec);
+    } else {
+      // Unstaged: worktree back to index (index already == HEAD for the file).
+      await runGit(this.opts.cwd, ["checkout", "--", path], this.opts.exec);
+    }
+  }
+
+  /**
+   * Restore a single path from a stash back into the working tree
+   * (STASHES → CHANGES, or STASHES → STAGED when `stage` is set). The path is
+   * removed from the stash, mirroring a per-file pop.
+   */
+  async boardRestoreFromStash(
+    nameOrId: string,
+    path: string,
+    options: { stage?: boolean } = {}
+  ): Promise<void> {
+    const { anatomy } = await this.resolveBoardStash(nameOrId);
+    const located = await locateInStash(this.opts, anatomy, path);
+    if (!located.entry) {
+      throw new StashboardError(`"${path}" is not a change in that stash.`);
+    }
+
+    const targetKind = await this.workingStateOf(path);
+    // Restoring onto an existing working change would clobber it — conflict.
+    if (targetKind !== "clean") {
+      throw new BoardConflictError(
+        path,
+        "the working tree already has changes there."
+      );
+    }
+
+    // 1. Materialize the stash's content into the working tree.
+    const sourceTree =
+      located.layer === "untracked"
+        ? anatomy.untrackedTree!
+        : anatomy.worktree;
+    await runGit(
+      this.opts.cwd,
+      ["restore", "--source=" + sourceTree, "--worktree", "--", path],
+      this.opts.exec
+    );
+    if (options.stage) {
+      await runGit(this.opts.cwd, ["add", "--", path], this.opts.exec);
+    }
+
+    // 2. Remove the path from the stash (best-effort rollback on failure).
+    const removeMaps = await this.removeFromStashCompose(anatomy, path);
+    const restoreCompose = { anatomy, ...removeMaps };
+    try {
+      await composeStash(this.opts, restoreCompose);
+    } catch {
+      // The swap failed. Roll back our working-tree write so we leave no trace:
+      // the target was clean (== HEAD, or an untracked/absent file) before.
+      await this.rollbackCleanPath(path);
+      throw new StashboardError(
+        `Could not update the stash for "${path}". Its content was written to ` +
+          "your working tree but the stash was left untouched — run the " +
+          "restore again once the underlying issue is fixed."
+      );
+    }
+    await this.assimilateMetadata(anatomy.message);
+  }
+
+  /**
+   * Move a path from one stash to another (STASHES ⇄ STASHES). Both stashes are
+   * rewritten transactionally: the target gains the file at the source's layer,
+   * the source loses it.
+   */
+  async boardMoveBetweenStashes(
+    sourceNameOrId: string,
+    targetNameOrId: string,
+    path: string
+  ): Promise<void> {
+    const source = await this.resolveBoardStash(sourceNameOrId);
+    const target = await this.resolveBoardStash(targetNameOrId);
+
+    const located = await locateInStash(this.opts, source.anatomy, path);
+    if (!located.entry) {
+      throw new StashboardError(`"${path}" is not a change in that stash.`);
+    }
+
+    const targetEntry = await locateInStash(this.opts, target.anatomy, path);
+    if (targetEntry.entry && targetEntry.entry.sha !== located.entry.sha) {
+      const targetStash = await this.resolvePublicStash(targetNameOrId);
+      throw new BoardConflictError(
+        path,
+        `it already has a different change in stash "${targetStash.name}".`
+      );
+    }
+
+    // Build BOTH new commits before touching any real reflog entry.
+    const srcLoc = { layer: located.layer, entry: located.entry };
+    const addMaps = this.addToStashCompose(srcLoc, path);
+    const { sha: targetSha } = await buildStashCommit(this.opts, {
+      anatomy: target.anatomy,
+      worktree: addMaps.worktree,
+      index: addMaps.index,
+      untracked: addMaps.untracked,
+    });
+
+    const removeMaps = await this.removeFromStashCompose(source.anatomy, path);
+    const { sha: sourceSha } = await buildStashCommit(this.opts, {
+      anatomy: source.anatomy,
+      worktree: removeMaps.worktree,
+      index: removeMaps.index,
+      untracked: removeMaps.untracked,
+    });
+
+    // Transaction: swap target first, then source; roll the target back if the
+    // source swap fails so the file is never in neither stash.
+    await swapStash(this.opts, {
+      originalSha: target.anatomy.sha,
+      message: target.anatomy.message,
+      sha: targetSha,
+    });
+    try {
+      await swapStash(this.opts, {
+        originalSha: source.anatomy.sha,
+        message: source.anatomy.message,
+        sha: sourceSha,
+      });
+    } catch (err) {
+      await swapStash(this.opts, {
+        originalSha: targetSha,
+        message: target.anatomy.message,
+        sha: target.anatomy.sha,
+      });
+      throw err;
+    }
+
+    await this.assimilateMetadata(source.anatomy.message);
+    await this.assimilateMetadata(target.anatomy.message);
+  }
+
+  /** Board view model: per-column working-tree files + per-stash files. */
+  async boardView(): Promise<BoardView> {
+    const state = await collectWorkingTreeState(this.opts);
+    const changes: BoardFile[] = [];
+    for (const p of state.staged) {
+      changes.push({ path: p, state: "staged" });
+    }
+    for (const p of state.unstaged) {
+      changes.push({ path: p, state: "unstaged" });
+    }
+    for (const p of state.untracked) {
+      changes.push({ path: p, state: "untracked" });
+    }
+
+    const stashes: BoardStashEntry[] = [];
+    for (const stash of await this.listStashes()) {
+      const { anatomy } = await this.resolveBoardStash(stash.id);
+      const files: BoardStashFile[] = [];
+      for (const f of stash.files ?? []) {
+        const located = await locateInStash(this.opts, anatomy, f);
+        if (!located.entry) continue;
+        files.push({
+          path: f,
+          layer: located.layer,
+          entry: located.entry,
+        });
+      }
+      stashes.push({ id: stash.id, name: stash.name, files });
+    }
+
+    return { changes, stashes };
+  }
+
+  // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
 
@@ -507,6 +757,121 @@ export class StashService {
       return result.stdout.trim().length > 0;
     } catch {
       return false;
+    }
+  }
+
+  private async resolveBoardStash(nameOrId: string): Promise<{
+    entry: StashEntry;
+    anatomy: StashAnatomy;
+  }> {
+    const { entry } = await this.resolveStash(nameOrId);
+    const anatomy = await resolveStashAnatomy(this.opts, entry.ref);
+    return { entry, anatomy };
+  }
+
+  /**
+   * Build the three layer maps that remove `path`'s change from a stash.
+   * Removal means "the stash records no change for this path": the worktree and
+   * index trees go back to the base entry (or are dropped when the path did not
+   * exist at base), and any untracked-root entry is deleted.
+   */
+  private async removeFromStashCompose(
+    anatomy: StashAnatomy,
+    p: string
+  ): Promise<{
+    worktree: Map<string, EntryUpdate | null>;
+    index: Map<string, EntryUpdate | null>;
+    untracked: Map<string, EntryUpdate | null>;
+  }> {
+    const baseEntry = await entryAtPath(this.opts, `${anatomy.base}^{tree}`, p);
+    const toBase: EntryUpdate | null = baseEntry ?? null;
+
+    const worktree = new Map<string, EntryUpdate | null>();
+    const index = new Map<string, EntryUpdate | null>();
+    const untracked = new Map<string, EntryUpdate | null>();
+
+    // The worktree tree always records the change (tracked or staged).
+    worktree.set(p, toBase);
+    // The index tree carries it when the change was staged; resetting it is a
+    // no-op tree-wise when the path was only unstaged.
+    if (anatomy.indexTree) index.set(p, toBase);
+    // Untracked files live only in W^3 — remove them outright.
+    if (anatomy.untrackedTree) untracked.set(p, null);
+    return { worktree, index, untracked };
+  }
+
+  /** Build the layer maps that add `entry` to a stash at its source layer. */
+  private addToStashCompose(
+    located: { layer: "tracked" | "index" | "untracked"; entry: EntryUpdate },
+    p: string
+  ): {
+    worktree: Map<string, EntryUpdate | null>;
+    index: Map<string, EntryUpdate | null>;
+    untracked: Map<string, EntryUpdate | null>;
+  } {
+    const worktree = new Map<string, EntryUpdate | null>();
+    const index = new Map<string, EntryUpdate | null>();
+    const untracked = new Map<string, EntryUpdate | null>();
+    if (located.layer === "untracked") {
+      untracked.set(p, located.entry);
+    } else {
+      worktree.set(p, located.entry);
+      if (located.layer === "index") index.set(p, located.entry);
+    }
+    return { worktree, index, untracked };
+  }
+
+  /**
+   * Refresh the metadata entry for the stash whose message matches, after a
+   * board mutation rewrote its git objects (files list may have changed).
+   */
+  private async assimilateMetadata(subject: string): Promise<void> {
+    const entries = await stashList(this.opts);
+    const entry = entries.find((e) => e.subject === subject);
+    if (!entry) return;
+    const parsed = parseStashSubject(entry.subject);
+    if (!parsed) return;
+    const commonDir = await gitCommonDir(this.opts);
+    const meta = readMetadata(commonDir);
+    const idx = meta.stashes.findIndex((s) => s.id === parsed.id);
+    if (idx === -1) return;
+    const files = await stashFiles({
+      cwd: this.opts.cwd,
+      exec: this.opts.exec,
+      ref: entry.ref,
+    });
+    const updated: Stash = {
+      ...meta.stashes[idx],
+      stashRef: entry.ref,
+      files,
+      includesUntracked: await this.hasThirdParent(entry.ref),
+    };
+    writeMetadata(commonDir, upsertStash(meta, updated));
+  }
+
+  /**
+   * Classify the current working-tree state of a path WITHOUT throwing on
+   * clean/mixed (unlike `classifyForBoard`) — used for board conflict guards.
+   */
+  private async workingStateOf(p: string): Promise<FileStateKind> {
+    const state = await collectWorkingTreeState(this.opts);
+    return classifyPath(p, state);
+  }
+
+  /**
+   * Undo a working-tree write that happened on top of a clean target: unstage,
+   * then restore the path from HEAD; a file that is not in HEAD is deleted.
+   */
+  private async rollbackCleanPath(p: string): Promise<void> {
+    try {
+      await runGit(this.opts.cwd, ["reset", "-q", "--", p], this.opts.exec);
+    } catch {
+      // Not staged; nothing to reset.
+    }
+    try {
+      await runGit(this.opts.cwd, ["restore", "--source=HEAD", "--worktree", "--", p], this.opts.exec);
+    } catch {
+      fs.rmSync(nodePath.resolve(this.opts.cwd, p), { force: true });
     }
   }
 }

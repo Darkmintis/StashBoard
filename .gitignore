@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build output
+packages/core/dist/
+packages/cli/dist/
+packages/extension/out/
+packages/extension/*.vsix
+.local/
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+*.tsbuildinfo
+
+# Test artifacts
+coverage/
+.tmp/

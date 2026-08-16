@@ -1,0 +1,25 @@
+{
+  "name": "stashboard-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "StashBoard — named, safe stashes for unfinished git work. GUI + CLI.",
+  "workspaces": [
+    "packages/core",
+    "packages/cli",
+    "packages/extension"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:core": "npm run build --workspace @stashboard/core",
+    "build:cli": "npm run build --workspace @stashboard/cli",
+    "build:extension": "npm run build --workspace @stashboard/extension",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:core": "npm run test --workspace @stashboard/core",
+    "cli": "node packages/cli/dist/git-stashboard.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

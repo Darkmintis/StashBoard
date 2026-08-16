@@ -1,0 +1,10 @@
+src/**
+scripts/**
+test/**
+node_modules/**
+dist/**
+tsconfig.json
+tsconfig.*.json
+*.tsbuildinfo
+**/*.map
+.vscode/**

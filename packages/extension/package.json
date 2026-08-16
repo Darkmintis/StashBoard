@@ -1,0 +1,130 @@
+{
+  "name": "stashboard",
+  "displayName": "StashBoard",
+  "description": "Named, safe stashes for your unfinished git work. Save changes aside, browse them, and restore them — built on git stash.",
+  "version": "0.1.0",
+  "publisher": "darkmintis",
+  "license": "MIT",
+  "engines": {
+    "vscode": "1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "stash",
+    "scm"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "icon": "assets/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Darkmintis/StashBoard"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "stashboard.save",
+        "title": "StashBoard: Save Selected Files to Stash..."
+      },
+      {
+        "command": "stashboard.restore",
+        "title": "StashBoard: Restore Stash"
+      },
+      {
+        "command": "stashboard.stage",
+        "title": "StashBoard: Restore Stash to Staged"
+      },
+      {
+        "command": "stashboard.preview",
+        "title": "StashBoard: Preview Stash"
+      },
+      {
+        "command": "stashboard.rename",
+        "title": "StashBoard: Rename Stash"
+      },
+      {
+        "command": "stashboard.delete",
+        "title": "StashBoard: Delete Stash"
+      },
+      {
+        "command": "stashboard.openFile",
+        "title": "Open File in Stash"
+      },
+      {
+        "command": "stashboard.saveAll",
+        "title": "StashBoard: Save All Changes to Stash"
+      },
+      {
+        "command": "stashboard.refresh",
+        "title": "StashBoard: Refresh"
+      }
+    ],
+    "menus": {
+      "scm/sourceControl": [
+        {
+          "command": "stashboard.saveAll",
+          "when": "scmProvider == stashboard",
+          "group": "1_stashboard@1"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "stashboard.save",
+          "when": "scmProvider == git",
+          "group": "2_stashboard@1"
+        },
+        {
+          "command": "stashboard.openFile",
+          "when": "scmProvider == stashboard",
+          "group": "inline@1"
+        }
+      ],
+      "scm/resourceGroup/context": [
+        {
+          "command": "stashboard.restore",
+          "when": "scmProvider == stashboard",
+          "group": "1_stashboard@1"
+        },
+        {
+          "command": "stashboard.stage",
+          "when": "scmProvider == stashboard",
+          "group": "1_stashboard@2"
+        },
+        {
+          "command": "stashboard.preview",
+          "when": "scmProvider == stashboard",
+          "group": "2_stashboard@1"
+        },
+        {
+          "command": "stashboard.rename",
+          "when": "scmProvider == stashboard",
+          "group": "2_stashboard@2"
+        },
+        {
+          "command": "stashboard.delete",
+          "when": "scmProvider == stashboard",
+          "group": "3_stashboard@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.6.3"
+  }
+}

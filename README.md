@@ -58,6 +58,30 @@ git stashboard drop "Auth Refactor"            # confirmation prompt unless --ye
 - The StashBoard input box lets you type a name and press Enter to save **all**
   current changes in one go.
 
+### Stash Board (drag & drop panel)
+
+Open **StashBoard → Stash Board** from the activity bar. It surfaces everything
+as three drop columns:
+
+- **STAGED** — files staged in the index.
+- **CHANGES** — unstaged and untracked working-tree files.
+- **STASHES** — one card per stash, listing its files.
+
+Drag a file card between columns (or between two stash cards) to move the
+change — no menus, no prompts:
+
+| Drag                                 | Result                              |
+| ------------------------------------ | ----------------------------------- |
+| CHANGES → STAGED                     | `git add`                           |
+| CHANGES → STASHES (onto a stash)     | stash that file into that stash     |
+| STASHES → CHANGES                    | restore that file to the worktree   |
+| STASHES → STAGED                     | restore that file into the index    |
+| STASHES → STASHES (another stash)    | move the file between stashes       |
+
+Every operation is transactional: the webview never mutates optimistically, so
+a rejected drop (e.g. the working tree already has edits there) snaps the card
+back with an inline error and the repo is left untouched.
+
 ## How it works / Is it safe?
 
 StashBoard is a thin, transparent layer over `git stash`:
@@ -79,8 +103,6 @@ StashBoard is a thin, transparent layer over `git stash`:
 ## What StashBoard does NOT do (yet)
 
 - Partial hunk selection — stashes are whole-file in v1.
-- Moving files directly between two stashes (workaround: restore, re-split,
-  re-stash).
 - Stash → direct commit (restore to staged, then commit normally).
 - Merging multiple stashes into one.
 - Binary diff previews (shown as "binary file changed").

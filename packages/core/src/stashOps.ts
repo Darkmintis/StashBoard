@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { GitError, defaultExec, type ExecFn, type ExecResult } from "./git";
 import type { StashEntry } from "./types";
 
@@ -261,4 +264,166 @@ export function isUnmergedCode(code: string): boolean {
   if (code.length < 2) return false;
   if (code === "??") return false;
   return code[0] !== " " && code[1] !== " " && /^[ADU][ADU]$/.test(code);
+}
+
+/** `git rev-parse --verify <refExpr>`. Throws when unresolved. */
+export async function gitRevParse(
+  opts: GitOpts,
+  refExpr: string
+): Promise<string> {
+  const result = await runGit(opts.cwd, ["rev-parse", "--verify", refExpr], opts.exec);
+  return result.stdout.trim();
+}
+
+/** Resolve a ref expression, returning null instead of throwing. */
+export async function gitRevParseOpt(
+  opts: GitOpts,
+  refExpr: string
+): Promise<string | null> {
+  const exec = opts.exec ?? defaultExec;
+  const result = await exec("git", ["rev-parse", "--verify", "-q", refExpr], {
+    cwd: opts.cwd,
+  });
+  if (result.code !== 0) return null;
+  return result.stdout.trim() || null;
+}
+
+export interface CommitTreeOptions {
+  tree: string;
+  parents?: string[];
+  message: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+/** `git commit-tree <tree> -p <parent>... -m <message>` → new commit sha. */
+export async function gitCommitTree(
+  opts: GitOpts,
+  options: CommitTreeOptions
+): Promise<string> {
+  const args = ["commit-tree", options.tree];
+  for (const parent of options.parents ?? []) args.push("-p", parent);
+  args.push("-m", options.message);
+  const result = await runGitWithEnv(opts, args, options.env);
+  return result.stdout.trim();
+}
+
+/** Hash a working-tree file into the object store; returns the blob sha. */
+export async function gitHashObject(
+  opts: GitOpts,
+  path: string
+): Promise<string> {
+  const result = await runGit(opts.cwd, ["hash-object", "-w", "--", path], opts.exec);
+  return result.stdout.trim();
+}
+
+/**
+ * Get the staged (index) mode+sha for a path, if it is tracked.
+ * Format: `<mode> <sha> <stage>\t<path>`.
+ */
+export async function indexEntry(
+  opts: GitOpts,
+  path: string
+): Promise<{ mode: string; sha: string } | null> {
+  const result = await runGit(
+    opts.cwd,
+    ["ls-files", "--stage", "-z", "--", path],
+    opts.exec
+  );
+  const tokens = result.stdout.split("\x00").filter((t) => t.length > 0);
+  if (tokens.length === 0) return null;
+  const match = /^(\d+)\s([0-9a-f]{40,64})\s\d/.exec(tokens[0]);
+  if (!match) return null;
+  return { mode: match[1], sha: match[2] };
+}
+
+/** The executable mode (100644 or 100755) of an existing working file. */
+export function blobModeForWorktree(stat: { mode?: number }): "100644" | "100755" {
+  if (stat.mode !== undefined && (stat.mode & 0o111) !== 0) return "100755";
+  return "100644";
+}
+
+/**
+ * Run git with extra environment variables (e.g. GIT_INDEX_FILE to point at a
+ * temporary index without touching the real one).
+ */
+export async function runGitWithEnv(
+  opts: GitOpts,
+  args: string[],
+  env: NodeJS.ProcessEnv = {}
+): Promise<ExecResult> {
+  const exec = opts.exec ?? defaultExec;
+  const result = await exec("git", args, { cwd: opts.cwd, env });
+  if (result.code !== 0) {
+    throw new GitError(args[0] ?? "git", args.slice(1), result);
+  }
+  return result;
+}
+
+/**
+ * Build a tree whose single path entry is set to a blob. Uses a throwaway
+ * index (`GIT_INDEX_FILE`) so the real index is never touched.
+ */
+export async function treeSetEntry(
+  opts: GitOpts,
+  baseTree: string,
+  path: string,
+  mode: string,
+  sha: string
+): Promise<string> {
+  return withTempIndex(opts, async (env) => {
+    await runGitWithEnv(opts, ["read-tree", baseTree], env);
+    await runGitWithEnv(
+      opts,
+      ["update-index", "--add", "--cacheinfo", `${mode},${sha},${path}`],
+      env
+    );
+    const out = await runGitWithEnv(opts, ["write-tree"], env);
+    return out.stdout.trim();
+  });
+}
+
+/** Build a tree with a path removed (`update-index --force-remove`). */
+export async function treeRemoveEntry(
+  opts: GitOpts,
+  baseTree: string,
+  path: string
+): Promise<string> {
+  return withTempIndex(opts, async (env) => {
+    await runGitWithEnv(opts, ["read-tree", baseTree], env);
+    await runGitWithEnv(opts, ["update-index", "--force-remove", "--", path], env);
+    const out = await runGitWithEnv(opts, ["write-tree"], env);
+    return out.stdout.trim();
+  });
+}
+
+async function withTempIndex(
+  opts: GitOpts,
+  fn: (env: NodeJS.ProcessEnv) => Promise<string>
+): Promise<string> {
+  const dir = await createTempDir("stashboard-index-");
+  const env = { GIT_INDEX_FILE: path.join(dir, "index") };
+  try {
+    return await fn(env);
+  } finally {
+    cleanupTempDir(dir);
+  }
+}
+
+function createTempDir(prefix: string): Promise<string> {
+  return Promise.resolve().then(() => {
+    const dir = path.join(
+      os.tmpdir(),
+      `${prefix}${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  });
+}
+
+function cleanupTempDir(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Best-effort; a leaked temp index file is harmless.
+  }
 }

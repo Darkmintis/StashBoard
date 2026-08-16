@@ -56,3 +56,37 @@ export interface RestoreResult {
   /** Human-readable detail (conflict summary, failure reason). */
   message?: string;
 }
+
+/** A file's change state as surfaced on the Stash Board columns. */
+export type StashFileState =
+  | "staged"
+  | "unstaged"
+  | "untracked"
+  | "mixed"
+  | "clean";
+
+/** A single file card on the Board CHANGES column. */
+export interface BoardFile {
+  path: string;
+  state: StashFileState;
+}
+
+/** A single file inside a stash card on the Board STASHES column. */
+export interface BoardStashFile {
+  path: string;
+  layer: "tracked" | "index" | "untracked";
+  entry: { mode: string; sha: string };
+}
+
+/** One stash card on the Board STASHES column. */
+export interface BoardStashEntry {
+  id: string;
+  name: string;
+  files: BoardStashFile[];
+}
+
+/** The full Stash Board view model. */
+export interface BoardView {
+  changes: BoardFile[];
+  stashes: BoardStashEntry[];
+}

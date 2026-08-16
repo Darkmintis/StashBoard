@@ -4,3 +4,4 @@ export * from "./stashOps";
 export * from "./validation";
 export * from "./metadata";
 export * from "./stashService";
+export * from "./board";

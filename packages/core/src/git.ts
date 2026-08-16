@@ -13,7 +13,7 @@ export interface ExecResult {
 export type ExecFn = (
   command: string,
   args: string[],
-  options: { cwd: string; maxBuffer?: number }
+  options: { cwd: string; maxBuffer?: number; env?: NodeJS.ProcessEnv }
 ) => Promise<ExecResult>;
 
 const DEFAULT_MAX_BUFFER = 128 * 1024 * 1024;
@@ -28,6 +28,9 @@ export const defaultExec: ExecFn = (command, args, options) =>
         windowsHide: true,
         encoding: "utf8",
         maxBuffer: options.maxBuffer ?? DEFAULT_MAX_BUFFER,
+        env: options.env
+          ? { ...process.env, ...options.env }
+          : undefined,
       },
       (error, stdout, stderr) => {
         if (error && typeof error !== "string") {
@@ -119,6 +122,16 @@ export class RestoreConflictError extends StashboardError {
     this.name = "RestoreConflictError";
     this.conflictFiles = conflictFiles;
     this.stashFiles = stashFiles;
+  }
+}
+
+/** Raised by board operations when a drag would clobber existing changes. */
+export class BoardConflictError extends StashboardError {
+  readonly file: string;
+  constructor(file: string, reason: string) {
+    super(`Cannot move "${file}": ${reason}`);
+    this.name = "BoardConflictError";
+    this.file = file;
   }
 }
 

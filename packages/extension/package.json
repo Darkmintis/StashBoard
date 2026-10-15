@@ -1,7 +1,7 @@
 {
   "name": "stashboard",
   "displayName": "StashBoard",
-  "description": "Named, safe stashes for your unfinished git work. Save changes aside, browse them, and restore them — built on git stash.",
+  "description": "Named, safe stashes for your unfinished git work. Save changes aside, browse them on a drag-and-drop board, and restore them — built on git stash.",
   "version": "0.1.0",
   "publisher": "darkmintis",
   "license": "MIT",
@@ -15,7 +15,9 @@
   "keywords": [
     "git",
     "stash",
-    "scm"
+    "scm",
+    "source control",
+    "wip"
   ],
   "main": "./out/extension.js",
   "activationEvents": [
@@ -24,15 +26,18 @@
   "icon": "assets/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Darkmintis/StashBoard"
+    "url": "https://github.com/Darkmintis/StashBoard",
+    "directory": "packages/extension"
   },
+  "bugs": "https://github.com/Darkmintis/StashBoard/issues",
+  "homepage": "https://github.com/Darkmintis/StashBoard#readme",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
           "id": "stashboard",
           "title": "StashBoard",
-          "icon": "assets/icon.png"
+          "icon": "assets/stashboard.svg"
         }
       ]
     },
@@ -42,7 +47,7 @@
           "type": "webview",
           "id": "stashboard.board",
           "name": "Stash Board",
-          "icon": "assets/icon.png",
+          "icon": "assets/stashboard.svg",
           "contextualTitle": "Stash Board"
         }
       ]
@@ -50,46 +55,75 @@
     "commands": [
       {
         "command": "stashboard.openBoard",
-        "title": "StashBoard: Open Board"
+        "title": "Open Board",
+        "category": "StashBoard",
+        "icon": "$(window)"
+      },
+      {
+        "command": "stashboard.focusSidebar",
+        "title": "Focus Sidebar Board",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.save",
-        "title": "StashBoard: Save Selected Files to Stash..."
+        "title": "Save Selected Files to Stash...",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.restore",
-        "title": "StashBoard: Restore Stash"
+        "title": "Restore Stash",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.stage",
-        "title": "StashBoard: Restore Stash to Staged"
+        "title": "Restore Stash to Staged",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.preview",
-        "title": "StashBoard: Preview Stash"
+        "title": "Preview Stash",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.rename",
-        "title": "StashBoard: Rename Stash"
+        "title": "Rename Stash",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.delete",
-        "title": "StashBoard: Delete Stash"
+        "title": "Delete Stash",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.openFile",
-        "title": "Open File in Stash"
+        "title": "Open File in Stash",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.saveAll",
-        "title": "StashBoard: Save All Changes to Stash"
+        "title": "Save All Changes to Stash",
+        "category": "StashBoard"
       },
       {
         "command": "stashboard.refresh",
-        "title": "StashBoard: Refresh"
+        "title": "Refresh",
+        "category": "StashBoard",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "stashboard.openBoard",
+          "when": "view == stashboard.board",
+          "group": "navigation@1"
+        },
+        {
+          "command": "stashboard.refresh",
+          "when": "view == stashboard.board",
+          "group": "navigation@2"
+        }
+      ],
       "scm/sourceControl": [
         {
           "command": "stashboard.saveAll",
@@ -134,6 +168,16 @@
           "command": "stashboard.delete",
           "when": "scmProvider == stashboard",
           "group": "3_stashboard@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "stashboard.openFile",
+          "when": "false"
+        },
+        {
+          "command": "stashboard.focusSidebar",
+          "when": "false"
         }
       ]
     }

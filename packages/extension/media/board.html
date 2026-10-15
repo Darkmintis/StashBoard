@@ -9,27 +9,48 @@
   <title>Stash Board</title>
 </head>
 <body>
-  <div class="toolbar">
-    <span class="title">Stash Board</span>
-    <button id="refresh" class="tool" title="Refresh">Refresh</button>
-  </div>
+  <header class="toolbar">
+    <div class="brand">
+      <span class="title">Stash Board</span>
+      <span id="subtitle" class="subtitle muted"></span>
+    </div>
+    <div class="actions">
+      <button id="newStash" class="primary" title="Save all current changes into a named stash">New stash</button>
+      <button id="refresh" class="tool" title="Refresh">Refresh</button>
+      <button id="openPanel" class="tool ghost" title="Open full panel">Expand</button>
+    </div>
+  </header>
+
   <div id="error" class="error hidden" role="alert"></div>
-  <div id="busy" class="busy hidden">Working…</div>
+  <div id="busy" class="busy hidden"><span class="spinner"></span> Working…</div>
 
   <main id="board">
     <section class="column" id="col-staged" data-column="staged">
-      <header class="col-head">STAGED</header>
+      <header class="col-head">
+        <span>Staged</span>
+        <span id="count-staged" class="count">0</span>
+      </header>
       <div class="cards"></div>
     </section>
     <section class="column" id="col-changes" data-column="changes">
-      <header class="col-head">CHANGES</header>
+      <header class="col-head">
+        <span>Changes</span>
+        <span id="count-changes" class="count">0</span>
+      </header>
       <div class="cards"></div>
     </section>
     <section class="column" id="col-stashes" data-column="stashes">
-      <header class="col-head">STASHES</header>
+      <header class="col-head">
+        <span>Stashes</span>
+        <span id="count-stashes" class="count">0</span>
+      </header>
       <div class="cards"></div>
     </section>
   </main>
+
+  <footer class="hint muted">
+    Drag files between columns · Drop onto a stash to park a change · Drop onto + New to create a stash
+  </footer>
 
   <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>

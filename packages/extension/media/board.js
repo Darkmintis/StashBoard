@@ -1,15 +1,9 @@
-// Stash Board webview. Renders the three-column board server state; drops are
-// sent to the extension host, and outcomes render only when state returns
-// (no optimistic UI). A failed drop shows the error banner and the board
-// re-renders from scratch, naturally snapping the card back.
+// Stash Board webview. Renders host state only — no optimistic UI.
+// Failed drops snap back when the next state message arrives.
 
 // @ts-ignore -- provided by VS Code in the webview context
 const vscode = acquireVsCodeApi();
 let state = null;
-
-// ---------------------------------------------------------------------------
-// Messages
-// ---------------------------------------------------------------------------
 
 function post(msg) {
   vscode.postMessage(msg);
@@ -21,10 +15,6 @@ window.addEventListener("message", (event) => {
   state = msg;
   render();
 });
-
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
 
 function el(parent, tag, className, text) {
   const node = document.createElement(tag);
@@ -43,13 +33,46 @@ function render() {
   } else {
     errBox.classList.add("hidden");
   }
-  if (!state.view) return;
+
+  const sub = document.getElementById("subtitle");
+  const newBtn = document.getElementById("newStash");
+
+  if (!state.view) {
+    sub.textContent = "";
+    newBtn.disabled = true;
+    clearBoard();
+    return;
+  }
 
   const staged = state.view.changes.filter((c) => c.state === "staged");
   const changed = state.view.changes.filter((c) => c.state !== "staged");
+  const stashes = state.view.stashes ?? [];
+
+  document.getElementById("count-staged").textContent = String(staged.length);
+  document.getElementById("count-changes").textContent = String(changed.length);
+  document.getElementById("count-stashes").textContent = String(stashes.length);
+
+  const totalChanges = staged.length + changed.length;
+  sub.textContent =
+    totalChanges === 0 && stashes.length === 0
+      ? "No changes yet"
+      : `${totalChanges} working · ${stashes.length} stash${stashes.length === 1 ? "" : "es"}`;
+  newBtn.disabled = !!state.busy || totalChanges === 0;
+
   renderCards("#col-staged .cards", staged);
   renderCards("#col-changes .cards", changed);
-  renderStashes();
+  renderStashes(stashes);
+}
+
+function clearBoard() {
+  for (const id of ["count-staged", "count-changes", "count-stashes"]) {
+    document.getElementById(id).textContent = "0";
+  }
+  for (const sel of ["#col-staged .cards", "#col-changes .cards", "#col-stashes .cards"]) {
+    const box = document.querySelector(sel);
+    box.replaceChildren();
+    el(box, "div", "empty", "Open a git workspace to use Stash Board.");
+  }
 }
 
 function changeCard(box, f, kind) {
@@ -58,6 +81,7 @@ function changeCard(box, f, kind) {
   card.dataset.kind = kind;
   card.dataset.path = f.path;
   card.dataset.state = f.state;
+  card.title = f.path;
   el(card, "span", `dot ${f.state}`);
   el(card, "span", "name", f.path);
   card.addEventListener("dragstart", onDragStart);
@@ -68,33 +92,56 @@ function renderCards(selector, files) {
   const box = document.querySelector(selector);
   box.replaceChildren();
   if (files.length === 0) {
-    el(box, "div", "empty", "Nothing here — drop a file card.");
+    const col = box.closest(".column")?.dataset.column;
+    const hint =
+      col === "staged"
+        ? "Drop a change here to stage it."
+        : "Working-tree edits land here.";
+    el(box, "div", "empty", hint);
     return;
   }
   for (const f of files) changeCard(box, f, "change");
 }
 
-function renderStashes() {
+function renderStashes(stashes) {
   const box = document.querySelector("#col-stashes .cards");
   box.replaceChildren();
-  const stashes = state.view.stashes ?? [];
+
+  const dropNew = el(box, "div", "new-stash");
+  dropNew.dataset.newStash = "1";
+  dropNew.textContent = "+ New stash — drop a file here";
+  makeDropTarget(dropNew);
+
   if (stashes.length === 0) {
-    el(box, "div", "empty", "No stashes yet.");
+    el(box, "div", "empty", "No stashes yet. Drag a file onto + New, or click New stash.");
     return;
   }
+
   for (const s of stashes) {
     const card = el(box, "div", "card stash-card");
     card.dataset.stashId = s.id;
-    el(card, "span", "dot tracked");
-    el(card, "span", "name stash-name", `${s.name} (${s.files.length})`);
+
+    const head = el(card, "div", "stash-head");
+    el(head, "span", "dot tracked");
+    el(head, "span", "name", `${s.name} (${s.files.length})`);
+
+    const actions = el(card, "div", "stash-actions");
+    actionBtn(actions, "Restore", () => post({ type: "restoreStash", stashId: s.id }));
+    actionBtn(actions, "Stage", () => post({ type: "stageStash", stashId: s.id }));
+    actionBtn(actions, "Rename", () => post({ type: "rename", stashId: s.id }));
+    actionBtn(actions, "Delete", () => post({ type: "delete", stashId: s.id }), true);
+
     const files = el(card, "div", "stash-files");
+    if (s.files.length === 0) {
+      el(files, "div", "empty", "Empty stash");
+    }
     for (const f of s.files) {
       const file = el(files, "div", "card");
       file.draggable = true;
       file.dataset.kind = "stashfile";
       file.dataset.path = f.path;
       file.dataset.stashId = s.id;
-      file.title = `Click to open: ${f.path}`;
+      file.title = `Open diff: ${f.path}`;
       el(file, "span", `dot ${f.layer}`);
       el(file, "span", "name", f.path);
       file.addEventListener("dragstart", onDragStart);
@@ -103,8 +150,17 @@ function renderStashes() {
         post({ type: "openFile", stashId: s.id, path: f.path });
       });
     }
-    makeDropTarget(card, "stash");
+    makeDropTarget(card);
   }
+}
+
+function actionBtn(parent, label, onClick, danger) {
+  const btn = el(parent, "button", danger ? "link danger" : "link", label);
+  btn.type = "button";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onClick();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -133,41 +189,50 @@ function onDragEnd() {
   }
 }
 
-/**
- * Whether `target` accepts a drop of the dragged card, and with what action.
- * Returns an object describing the extension message, or null when invalid.
- */
+/** Return the host message for a drop, or null when invalid. */
 function dropAction(target) {
   if (!dragData) return null;
   const stashCard = target.closest(".stash-card");
+  const newZone = target.closest("[data-new-stash]");
   const column = target.closest(".column");
   const targetColumn = column?.dataset.column;
 
-  // Change card → STAGED column: stage it.
+  // Change → STAGED
   if (dragData.kind === "change" && targetColumn === "staged") {
-    if (dragData.state === "staged") return null; // already staged
+    if (dragData.state === "staged") return null;
     return { type: "stage", path: dragData.path };
   }
 
-  // Change card → a stash: add to stash.
+  // Staged change → CHANGES (unstage)
+  if (dragData.kind === "change" && targetColumn === "changes") {
+    if (dragData.state !== "staged") return null;
+    return { type: "unstage", path: dragData.path };
+  }
+
+  // Change → + New stash zone (or empty STASHES column)
+  if (dragData.kind === "change" && (newZone || (targetColumn === "stashes" && !stashCard))) {
+    return { type: "create", paths: [dragData.path] };
+  }
+
+  // Change → existing stash
   if (dragData.kind === "change" && stashCard) {
     return { type: "add", stashId: stashCard.dataset.stashId, path: dragData.path };
   }
 
-  // Stash file → CHANGES column: restore (to working tree).
+  // Stash file → CHANGES
   if (dragData.kind === "stashfile" && targetColumn === "changes") {
     return { type: "restore", stashId: dragData.stashId, path: dragData.path, staged: false };
   }
 
-  // Stash file → STAGED column: restore into the index.
+  // Stash file → STAGED
   if (dragData.kind === "stashfile" && targetColumn === "staged") {
     return { type: "restore", stashId: dragData.stashId, path: dragData.path, staged: true };
   }
 
-  // Stash file → a different stash: move between stashes.
+  // Stash file → another stash
   if (dragData.kind === "stashfile" && stashCard) {
     const toId = stashCard.dataset.stashId;
-    if (toId === dragData.stashId) return null; // same stash — no-op
+    if (toId === dragData.stashId) return null;
     return {
       type: "move",
       fromStashId: dragData.stashId,
@@ -201,4 +266,6 @@ for (const col of document.querySelectorAll(".column")) {
 }
 
 document.getElementById("refresh").addEventListener("click", () => post({ type: "refresh" }));
+document.getElementById("newStash").addEventListener("click", () => post({ type: "createAll" }));
+document.getElementById("openPanel").addEventListener("click", () => post({ type: "openPanel" }));
 post({ type: "init" });

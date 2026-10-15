@@ -91,54 +91,58 @@ export class StashBoardSCM implements vscode.Disposable {
   }
 
   private async refresh(): Promise<void> {
-    const repo = await this.resolveRepo();
-    if (!repo) {
-      this.teardownScm();
-      return;
-    }
-    this.repoPath = repo;
-    this.service = new StashService({ cwd: repo });
-    this.ensureScm();
-
-    let stashes;
     try {
-      stashes = await this.service.listStashes();
-    } catch {
-      this.teardownScm();
-      return;
-    }
-
-    this.scm!.count = stashes.length;
-    this.maybeWarnAboutStashCount(stashes.length);
-
-    const liveIds = new Set(stashes.map((s) => s.id));
-    for (const [id, group] of this.groups) {
-      if (!liveIds.has(id)) {
-        group.dispose();
-        this.groups.delete(id);
+      const repo = await this.resolveRepo();
+      if (!repo) {
+        this.teardownScm();
+        return;
       }
-    }
+      this.repoPath = repo;
+      this.service = new StashService({ cwd: repo });
+      this.ensureScm();
 
-    for (const stash of stashes) {
-      const label = `${stash.name} (${stash.files.length})`;
-      let group = this.groups.get(stash.id);
-      if (!group) {
-        group = this.scm!.createResourceGroup(stash.id, label);
-        this.groups.set(stash.id, group);
+      let stashes;
+      try {
+        stashes = await this.service.listStashes();
+      } catch {
+        this.teardownScm();
+        return;
       }
-      group.label = label;
-      group.resourceStates = stash.files.map((file) => {
-        const state: vscode.SourceControlResourceState = {
-          resourceUri: vscode.Uri.file(path.join(repo, file)),
-          contextValue: "stashboardStashFile",
-          command: {
-            command: "stashboard.openFile",
-            title: "Open in Stash",
-            arguments: [stash.id, file],
-          },
-        };
-        return state;
-      });
+
+      this.scm!.count = stashes.length;
+      this.maybeWarnAboutStashCount(stashes.length);
+
+      const liveIds = new Set(stashes.map((s) => s.id));
+      for (const [id, group] of this.groups) {
+        if (!liveIds.has(id)) {
+          group.dispose();
+          this.groups.delete(id);
+        }
+      }
+
+      for (const stash of stashes) {
+        const label = `${stash.name} (${stash.files.length})`;
+        let group = this.groups.get(stash.id);
+        if (!group) {
+          group = this.scm!.createResourceGroup(stash.id, label);
+          this.groups.set(stash.id, group);
+        }
+        group.label = label;
+        group.resourceStates = stash.files.map((file) => {
+          const state: vscode.SourceControlResourceState = {
+            resourceUri: vscode.Uri.file(path.join(repo, file)),
+            contextValue: "stashboardStashFile",
+            command: {
+              command: "stashboard.openFile",
+              title: "Open in Stash",
+              arguments: [stash.id, file],
+            },
+          };
+          return state;
+        });
+      }
+    } finally {
+      void vscode.commands.executeCommand("stashboard.boardSync");
     }
   }
 

@@ -11,12 +11,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - Core library (`@stashboard/core`) — pure logic over `git stash`, no VS Code
   dependencies. Save, restore, stage, rename, delete, preview, reconcile.
-- **Stash Board** — a three-column drag-and-drop panel (STAGED / CHANGES /
-  STASHES) in the activity bar. Drag file cards to stage, stash, restore, or
-  move files between stashes. Every operation is transactional with rollback;
-  rejected drops snap back with an inline error. Core board primitives build
-  and swap the underlying stash commits layer-by-layer with a per-file
-  `stash@{N}` ref re-resolution at swap time.
+- **Stash Board** — three-column drag-and-drop board in the activity bar and as
+  a full editor panel (`StashBoard: Open Board`). Stage / unstage, create a
+  stash from a dropped file or **New stash**, restore / stage / rename / delete
+  whole stashes from card actions, move files between stashes. Every operation
+  is transactional with rollback; rejected drops snap back with an inline error.
 - CLI (`git stashboard`) — `add`, `list`, `show`, `restore`, `stage`, `rename`,
   `drop`. Every stash is a real `git stash` entry; user stashes are never
   touched.

@@ -70,27 +70,28 @@ git stashboard drop "Auth Refactor"            # confirmation prompt unless --ye
 
 ### Stash Board (drag & drop panel)
 
-Open **StashBoard → Stash Board** from the activity bar. It surfaces everything
-as three drop columns:
+Open **StashBoard: Open Board** for the full editor panel, or use the activity-bar
+**Stash Board** view. Three drop columns:
 
-- **STAGED** — files staged in the index.
-- **CHANGES** — unstaged and untracked working-tree files.
-- **STASHES** — one card per stash, listing its files.
+- **Staged** — files staged in the index.
+- **Changes** — unstaged and untracked working-tree files.
+- **Stashes** — one card per stash, with Restore / Stage / Rename / Delete.
 
 Drag a file card between columns (or between two stash cards) to move the
-change — no menus, no prompts:
+change — no menus required:
 
 | Drag                                 | Result                              |
 | ------------------------------------ | ----------------------------------- |
-| CHANGES → STAGED                     | `git add`                           |
-| CHANGES → STASHES (onto a stash)     | stash that file into that stash     |
-| STASHES → CHANGES                    | restore that file to the worktree   |
-| STASHES → STAGED                     | restore that file into the index    |
-| STASHES → STASHES (another stash)    | move the file between stashes       |
+| Changes → Staged                     | `git add`                           |
+| Staged → Changes                     | unstage                             |
+| Changes → + New stash                | create a named stash from that file |
+| Changes → an existing stash          | add that file into the stash        |
+| Stash file → Changes / Staged        | restore that file                   |
+| Stash → another stash                | move the file between stashes       |
 
-Every operation is transactional: the webview never mutates optimistically, so
-a rejected drop (e.g. the working tree already has edits there) snaps the card
-back with an inline error and the repo is left untouched.
+Click **New stash** to park every current change under one name. Every operation
+is transactional: the webview never mutates optimistically, so a rejected drop
+snaps the card back with an inline error and the repo is left untouched.
 
 ## How it works / Is it safe?
 

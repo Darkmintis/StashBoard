@@ -6,11 +6,11 @@ let scm: StashBoardSCM | undefined;
 let board: BoardPanel | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // Board first so `stashboard.boardSync` exists before the SCM's initial refresh.
+  board = BoardPanel.register(context);
   scm = new StashBoardSCM();
   context.subscriptions.push(scm);
   await scm.activate(context);
-
-  board = BoardPanel.register(context);
 }
 
 export function deactivate(): void {

@@ -1,10 +1,10 @@
-## [Unreleased]
+## [0.1.0] — 2026-10-15
 
 ### Added
-- Initial release (v0.1.0): StashBoard section in the Source Control sidebar,
-  Save to Stash right-click on Git's Changes list, restore/stage/preview/
-  rename/delete, native diff per file, self-healing metadata.
-- Stash-count badge on the StashBoard source control header.
-- Soft one-time warning when the stash count passes 20, suggesting cleanup.
-- `StashBoard: Save All Changes to Stash` exposed in the Command Palette and
-  on the StashBoard source control in the Source Control Repositories view.
+- Stash Board webview in the activity bar plus a full editor panel
+  (`StashBoard: Open Board`), modeled for day-to-day stash management.
+- Board actions: New stash, restore / stage / rename / delete per stash card,
+  drag to stage / unstage / create / grow / restore / move files.
+- StashBoard section in the Source Control sidebar with Save to Stash on Git's
+  Changes list, native per-file diffs, and apply-then-drop restore safety.
+- Soft one-time warning when the stash count passes 20.

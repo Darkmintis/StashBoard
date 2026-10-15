@@ -1,0 +1,65 @@
+name: Release
+
+# Push a version tag to build the .vsix and publish a GitHub Release.
+#   git tag v0.1.0 && git push origin v0.1.0
+# Tag must match packages/extension/package.json "version".
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build .vsix + GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Check tag matches extension version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./packages/extension/package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match packages/extension/package.json version $PKG"
+            exit 1
+          fi
+          echo "Releasing StashBoard v$PKG"
+
+      - run: npm ci
+
+      - name: Build all workspaces
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Package .vsix
+        run: npm --workspace @stashboard/extension run package
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./packages/extension/package.json').version")"
+          VSIX="packages/extension/stashboard-${VERSION}.vsix"
+          test -f "$VSIX"
+          gh release create "v${VERSION}" "$VSIX" \
+            --title "StashBoard v${VERSION}" \
+            --generate-notes \
+            --verify-tag

@@ -3,6 +3,10 @@
 **Named, safe stashes for your unfinished git work.** A VS Code extension and a
 `git stashboard` CLI that make git's own stash visible, named, and browsable.
 
+[![CI](https://github.com/Darkmintis/StashBoard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Darkmintis/StashBoard/actions/workflows/ci.yml)
+[![Release](https://github.com/Darkmintis/StashBoard/actions/workflows/release.yml/badge.svg)](https://github.com/Darkmintis/StashBoard/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 Git gives you one active working tree. Real development produces several
 unrelated groups of unfinished changes at once. `git stash` works, but stashes
 are unnamed (`stash@{0}`), invisible, and nobody remembers
@@ -27,6 +31,12 @@ plain `git stash list`. Nothing proprietary, nothing that traps your data.
 
 - **VS Code extension**: [Marketplace](https://marketplace.visualstudio.com/)
   and [Open VSX](https://open-vsx.org/) (search "StashBoard").
+- **Local build (pre-release)**: download the `.vsix` from the latest
+  [GitHub Release](https://github.com/Darkmintis/StashBoard/releases), then
+  install it from VS Code's **Extensions → Install from VSIX…** or:
+  ```bash
+  code --install-extension stashboard-0.1.0.vsix
+  ```
 - **CLI**: `npm install -g @stashboard/cli`, then use `git stashboard ...`.
 
 > On Windows, `git stashboard` resolves the extensionless `git-stashboard` shim
@@ -115,6 +125,18 @@ npm install
 npm run build
 npm test          # core unit+integration tests + CLI tests against real temp repos
 ```
+
+### Releasing
+
+```bash
+# Bump version in packages/extension/package.json
+npm run build && npm run typecheck && npm test
+git tag v0.1.0
+git push origin v0.1.0    # triggers the Release workflow → GitHub Release with .vsix
+```
+
+The release workflow checks that the tag matches the extension version, builds,
+typechecks, tests, packages the `.vsix`, and attaches it to a GitHub Release.
 
 Structure:
 

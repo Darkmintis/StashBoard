@@ -566,14 +566,21 @@ export class StashService {
   async boardView(): Promise<BoardView> {
     const state = await collectWorkingTreeState(this.opts);
     const changes: BoardFile[] = [];
-    for (const p of state.staged) {
-      changes.push({ path: p, state: "staged" });
-    }
-    for (const p of state.unstaged) {
-      changes.push({ path: p, state: "unstaged" });
-    }
-    for (const p of state.untracked) {
-      changes.push({ path: p, state: "untracked" });
+    // Collect all unique changed paths, classifying each through `classifyPath`
+    // so a file with both staged AND unstaged changes appears once (as "mixed")
+    // instead of being double-listed across the STAGED and CHANGES columns.
+    const seen = new Set<string>();
+    for (const p of [
+      ...state.staged,
+      ...state.unstaged,
+      ...state.untracked,
+      ...state.unmerged,
+    ]) {
+      if (seen.has(p)) continue;
+      seen.add(p);
+      const kind = classifyPath(p, state);
+      if (kind === "clean" || kind === "unmerged") continue;
+      changes.push({ path: p, state: kind });
     }
 
     const stashes: BoardStashEntry[] = [];

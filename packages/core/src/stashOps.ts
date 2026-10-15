@@ -230,45 +230,71 @@ export async function stashShowPatch(
   return tracked.stdout;
 }
 
+/** One path from `git stash show --name-status` (status letter + path). */
+export interface StashFileEntry {
+  path: string;
+  /** Short git status letter: M, A, D, R, C, T, or U (untracked). */
+  status: string;
+}
+
 /**
- * `git stash show --name-status` — the list of files a stash touches.
- * Parse order-preserving output using `-z` so paths are unquoted.
+ * `git stash show --name-status` - files a stash touches, with status letters.
  */
-export async function stashFiles(
+export async function stashFileEntries(
   opts: GitOpts & { ref: string }
-): Promise<string[]> {
+): Promise<StashFileEntry[]> {
   const result = await runGit(
     opts.cwd,
     ["stash", "show", "--name-status", "-u", "-z", opts.ref],
     opts.exec
   );
-  return parseNameStatusZ(result.stdout);
+  return parseNameStatusEntriesZ(result.stdout);
 }
 
 /**
- * Parse `git diff ... --name-status -z` output into a list of paths.
+ * `git stash show --name-status` - the list of files a stash touches.
+ * Parse order-preserving output using `-z` so paths are unquoted.
+ */
+export async function stashFiles(
+  opts: GitOpts & { ref: string }
+): Promise<string[]> {
+  return (await stashFileEntries(opts)).map((e) => e.path);
+}
+
+/**
+ * Parse `git diff ... --name-status -z` output into path + status entries.
  *
  * With `-z`, the output is `STATUS\0path\0` (renames/copies are
  * `R100\0old\0new\0`). The status and path are NUL-separated, NOT tab-separated
  * (tabs only appear without `-z`).
  */
-export function parseNameStatusZ(output: string): string[] {
+export function parseNameStatusEntriesZ(output: string): StashFileEntry[] {
   const tokens = output.split("\x00").filter((t) => t.length > 0);
-  const paths: string[] = [];
+  const entries: StashFileEntry[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     if (!/^[A-Z]\d{0,3}$/.test(token) && token !== "??") continue;
     const status = token.replace(/\d+$/, "");
     const path1 = tokens[i + 1];
     if (path1 === undefined) break;
-    paths.push(path1);
     i++;
     if ((status === "R" || status === "C") && i + 1 < tokens.length) {
-      paths.push(tokens[i + 1]);
+      entries.push({ path: path1, status });
+      entries.push({ path: tokens[i + 1], status });
       i++;
+    } else {
+      entries.push({
+        path: path1,
+        status: status === "??" ? "U" : status,
+      });
     }
   }
-  return paths;
+  return entries;
+}
+
+/** Paths only - kept for callers that do not need status letters. */
+export function parseNameStatusZ(output: string): string[] {
+  return parseNameStatusEntriesZ(output).map((e) => e.path);
 }
 
 /**

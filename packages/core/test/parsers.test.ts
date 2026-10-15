@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isUnmergedCode, parseGitVersion, parseNameStatusZ } from "../src/stashOps";
+import {
+  isUnmergedCode,
+  parseGitVersion,
+  parseNameStatusEntriesZ,
+  parseNameStatusZ,
+} from "../src/stashOps";
 import { isStashboardSubject } from "../src/git";
 import { parseStashSubject } from "../src/stashService";
 
@@ -30,6 +35,16 @@ test("parseNameStatusZ extracts paths including renames", () => {
 
 test("parseNameStatusZ handles empty output", () => {
   assert.deepEqual(parseNameStatusZ(""), []);
+});
+
+test("parseNameStatusEntriesZ keeps status letters", () => {
+  const out = "M\x00a.ts\x00A\x00b.ts\x00??\x00c.ts\x00D\x00gone.ts\x00";
+  assert.deepEqual(parseNameStatusEntriesZ(out), [
+    { path: "a.ts", status: "M" },
+    { path: "b.ts", status: "A" },
+    { path: "c.ts", status: "U" },
+    { path: "gone.ts", status: "D" },
+  ]);
 });
 
 test("parseStashSubject extracts id, name and branch", () => {

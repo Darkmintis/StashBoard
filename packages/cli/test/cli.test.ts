@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -185,4 +186,118 @@ test("cli help lists commands", async () => {
   assert.equal(result.code, 0);
   assert.ok(result.stdout.includes("add"));
   assert.ok(result.stdout.includes("restore"));
+});
+
+test("cli show --file prints a scoped diff for a tracked file", async () => {
+  const dir = await makeRepo();
+  try {
+    fs.writeFileSync(path.join(dir, "a.txt"), "a2\n");
+    fs.writeFileSync(path.join(dir, "b.txt"), "b2\n");
+    await runCli(dir, ["add", "a.txt", "b.txt", "--name", "TwoFiles"]);
+
+    const show = await runCli(dir, ["show", "TwoFiles", "--file", "a.txt"]);
+    assert.equal(show.code, 0, show.stderr);
+    assert.ok(show.stdout.includes("a.txt"), "output should mention a.txt");
+    assert.ok(!show.stdout.includes("b.txt"), "output should not mention b.txt");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli show --file prints a diff for an untracked file in the stash", async () => {
+  const dir = await makeRepo();
+  try {
+    fs.writeFileSync(path.join(dir, "tracked.txt"), "tracked\n");
+    fs.writeFileSync(path.join(dir, "notes.txt"), "untracked\n");
+    await runCli(dir, ["add", "tracked.txt", "notes.txt", "--name", "WithUntracked"]);
+
+    const show = await runCli(dir, ["show", "WithUntracked", "--file", "notes.txt"]);
+    assert.equal(show.code, 0, show.stderr);
+    assert.ok(show.stdout.includes("notes.txt"), "output should mention notes.txt");
+    assert.ok(show.stdout.includes("untracked"), "output should contain file content");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli add --staged stashes only staged changes", async () => {
+  const dir = await makeRepo();
+  try {
+    fs.writeFileSync(path.join(dir, "a.txt"), "staged\n");
+    await git(dir, ["add", "a.txt"]);
+    fs.writeFileSync(path.join(dir, "b.txt"), "unstaged\n");
+
+    // --staged should stash only the staged file, leaving the unstaged one.
+    const add = await runCli(dir, ["add", "a.txt", "--name", "StagedOnly", "--staged"]);
+    assert.equal(add.code, 0, add.stderr);
+    assert.ok(add.stdout.includes("StagedOnly"));
+
+    // The unstaged file should still be in the working tree.
+    assert.equal(
+      fs.readFileSync(path.join(dir, "b.txt"), "utf8"),
+      "unstaged\n",
+      "unstaged file untouched"
+    );
+    // The staged file should be back to HEAD.
+    assert.equal(
+      fs.readFileSync(path.join(dir, "a.txt"), "utf8"),
+      "a\n",
+      "staged file reverted"
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli add --staged rejects if any selected file is not purely staged", async () => {
+  const dir = await makeRepo();
+  try {
+    fs.writeFileSync(path.join(dir, "a.txt"), "v1\n");
+    await git(dir, ["add", "a.txt"]);
+    fs.writeFileSync(path.join(dir, "a.txt"), "v1\nv2\n"); // both staged + unstaged
+
+    const result = await runCli(dir, ["add", "a.txt", "--name", "Bad", "--staged"]);
+    assert.equal(result.code, 1, "should fail on mixed state");
+    assert.ok(
+      result.stderr.toLowerCase().includes("staged"),
+      "should mention the staged requirement"
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli list with no stashes prints a helpful message", async () => {
+  const dir = await makeRepo();
+  try {
+    const result = await runCli(dir, ["list"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(
+      result.stdout.toLowerCase().includes("no stashes"),
+      "should mention no stashes"
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli drop without --yes prompts and cancels on rejection", async () => {
+  const dir = await makeRepo();
+  try {
+    fs.writeFileSync(path.join(dir, "a.txt"), "data\n");
+    await runCli(dir, ["add", "a.txt", "--name", "Persisted"]);
+
+    const child = spawnSync("node", [CLI, "drop", "Persisted"], {
+      cwd: dir,
+      input: "n\n",
+      encoding: "utf8",
+    });
+    assert.equal(child.status, 0, `drop cancelled; stderr: ${child.stderr}`);
+
+    // Stash should still exist.
+    const stashList = spawnSync("git", ["stash", "list"], { cwd: dir, encoding: "utf8" });
+    assert.ok(stashList.stdout.includes("Persisted"), "stash should still be present");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

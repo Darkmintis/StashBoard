@@ -382,6 +382,17 @@ export class StashService {
   }
 
   /**
+   * Unstage a path (STAGED → CHANGES). Leaves the working-tree edits intact.
+   */
+  async boardUnstage(path: string): Promise<void> {
+    const kind = await classifyForBoard(this.opts, path);
+    if (kind !== "staged") {
+      throw new StashboardError(`"${path}" is not staged.`);
+    }
+    await runGit(this.opts.cwd, ["restore", "--staged", "--", path], this.opts.exec);
+  }
+
+  /**
    * Move a path's working change into an existing stash (CHANGES → STASHES).
    * The stash gains the path at the layer matching its current kind; the
    * working-change copy is then reverted so the change lives only in the stash.

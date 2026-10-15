@@ -28,6 +28,22 @@ test("boardStage stages an unstaged file (CHANGES -> STAGED)", async () => {
   }
 });
 
+test("boardUnstage moves a staged file back to CHANGES", async () => {
+  const repo = await makeRepo();
+  try {
+    repo.write("base.txt", "edited\n");
+    const service = serviceFor(repo);
+    await service.boardStage("base.txt");
+    await service.boardUnstage("base.txt");
+    const cached = await repo.run(["diff", "--cached", "--name-only"]);
+    assert.equal(cached.stdout.trim(), "");
+    const work = await repo.run(["diff", "--name-only"]);
+    assert.ok(work.stdout.includes("base.txt"));
+  } finally {
+    repo.remove();
+  }
+});
+
 test("boardAddToStash moves an unstaged change into an existing stash", async () => {
   const repo = await makeRepo();
   try {

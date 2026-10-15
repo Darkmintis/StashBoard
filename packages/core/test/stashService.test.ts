@@ -341,3 +341,108 @@ test("metadata survives a full stash lifecycle without corruption", async () => 
     repo.remove();
   }
 });
+
+test("previewFile returns a scoped diff for a tracked file in a stash", async () => {
+  const repo = await makeRepo();
+  try {
+    // base.txt is tracked (committed "base\n"); modify it.
+    repo.write("base.txt", "tracked change\n");
+    // Create a genuinely untracked file to verify it doesn't leak.
+    repo.write("notes.txt", "should not appear\n");
+    const service = serviceFor(repo);
+    const stash = await service.save(["base.txt", "notes.txt"], "Two Files");
+
+    const patch = await service.previewFile(stash, "base.txt");
+    assert.ok(patch.includes("base.txt"), "patch should mention the file");
+    assert.ok(patch.includes("tracked change"), "patch should contain the content");
+    assert.ok(!patch.includes("notes.txt"), "should not leak the other file");
+  } finally {
+    repo.remove();
+  }
+});
+
+test("previewFile returns a diff for an untracked file in a stash", async () => {
+  const repo = await makeRepo();
+  try {
+    repo.write("base.txt", "tracked change\n");
+    repo.write("notes.txt", "untracked content\n");
+    const service = serviceFor(repo);
+    const stash = await service.save(["base.txt", "notes.txt"], "With Untracked");
+
+    const patch = await service.previewFile(stash, "notes.txt");
+    assert.ok(patch.includes("notes.txt"), "patch should mention the file");
+    assert.ok(patch.includes("untracked content"), "patch should contain the content");
+    assert.ok(!patch.includes("base.txt"), "should not leak the other file");
+  } finally {
+    repo.remove();
+  }
+});
+
+test("boardView does not double-list mixed staged+unstaged files", async () => {
+  const repo = await makeRepo();
+  try {
+    // A file with both staged and unstaged changes.
+    repo.write("base.txt", "staged\n");
+    await repo.run(["add", "base.txt"]);
+    repo.write("base.txt", "staged\nunstaged\n");
+
+    const view = await serviceFor(repo).boardView();
+
+    const baseEntries = view.changes.filter((c) => c.path === "base.txt");
+    assert.equal(baseEntries.length, 1, "mixed file should appear exactly once");
+    assert.equal(baseEntries[0].state, "mixed", "file should be classified as mixed");
+  } finally {
+    repo.remove();
+  }
+});
+
+test("boardView lists staged, unstaged, and untracked separately", async () => {
+  const repo = await makeRepo();
+  try {
+    repo.write("base.txt", "staged\n");
+    await repo.run(["add", "base.txt"]);
+    repo.write("base.txt", "staged\nunstaged\n");
+    repo.write("untracked.txt", "fresh\n");
+
+    const view = await serviceFor(repo).boardView();
+    const byPath = new Map(view.changes.map((c) => [c.path, c.state]));
+
+    assert.equal(byPath.get("base.txt"), "mixed");
+    assert.equal(byPath.get("untracked.txt"), "untracked");
+    assert.equal(view.changes.length, 2, "exactly two changed files");
+  } finally {
+    repo.remove();
+  }
+});
+
+test("boardView with no working changes and no stashes returns empty", async () => {
+  const repo = await makeRepo();
+  try {
+    const view = await serviceFor(repo).boardView();
+    assert.equal(view.changes.length, 0, "no working-tree changes");
+    assert.equal(view.stashes.length, 0, "no stashes");
+  } finally {
+    repo.remove();
+  }
+});
+
+test("boardView lists per-stash files with their layer", async () => {
+  const repo = await makeRepo();
+  try {
+    // base.txt is tracked (committed "base\n"); modify it.
+    // notes.txt is genuinely untracked.
+    repo.write("base.txt", "tracked change\n");
+    repo.write("notes.txt", "untracked change\n");
+    await serviceFor(repo).save(["base.txt", "notes.txt"], "Mixed Stash");
+
+    const view = await serviceFor(repo).boardView();
+    const stash = view.stashes[0];
+    assert.ok(stash, "should have one stash");
+
+    const layers = new Map(stash.files.map((f) => [f.path, f.layer]));
+    assert.equal(layers.get("base.txt"), "tracked", "tracked file should be in the worktree tree layer");
+    assert.equal(layers.get("notes.txt"), "untracked", "untracked file should be in the untracked layer");
+  } finally {
+    repo.remove();
+  }
+});

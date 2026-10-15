@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isUnmergedCode, parseGitVersion, parseNameStatusZ } from "../src/stashOps";
+import { isStashboardSubject } from "../src/git";
 import { parseStashSubject } from "../src/stashService";
 
 test("parseGitVersion handles common formats", () => {
@@ -69,4 +70,12 @@ test("isUnmergedCode identifies conflict statuses only", () => {
   for (const code of ["M ", " M", "MM", "??", "R ", " D"]) {
     assert.equal(isUnmergedCode(code), false, code);
   }
+});
+
+test("isStashboardSubject detects stashboard tags", () => {
+  assert.equal(isStashboardSubject("WIP on main: stashboard:abc-123:My Stash"), true);
+  assert.equal(isStashboardSubject("stashboard:abc-123:My Stash"), true);
+  assert.equal(isStashboardSubject("WIP on main: stuff"), false);
+  assert.equal(isStashboardSubject(""), false);
+  assert.equal(isStashboardSubject("stash@{0}"), false);
 });

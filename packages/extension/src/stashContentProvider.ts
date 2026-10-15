@@ -55,13 +55,27 @@ export class StashContentProvider implements vscode.TextDocumentContentProvider 
     // Per-file content for the native diff editor.
     const { execFile } = await import("node:child_process");
     return new Promise((resolve) => {
+      // Tracked files live in the stash commit's own tree; untracked files
+      // (captured with -u) live in ^3. Try the worktree tree first, then fall
+      // back to the untracked root so diff-editing an untracked stash file works.
       execFile(
         "git",
         ["show", `${ref}:${file}`],
         { cwd: repo, maxBuffer: 128 * 1024 * 1024, windowsHide: true, encoding: "utf8" },
         (err, stdout) => {
           if (err) {
-            resolve("(binary or missing in this stash)");
+            execFile(
+              "git",
+              ["show", `${ref}^3:${file}`],
+              { cwd: repo, maxBuffer: 128 * 1024 * 1024, windowsHide: true, encoding: "utf8" },
+              (err2, stdout2) => {
+                if (err2) {
+                  resolve("(binary or missing in this stash)");
+                  return;
+                }
+                resolve(stdout2);
+              }
+            );
             return;
           }
           resolve(stdout);

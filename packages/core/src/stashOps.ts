@@ -185,14 +185,49 @@ export async function stashDrop(
   await runGit(opts.cwd, ["stash", "drop", opts.ref], opts.exec);
 }
 
-/** `git stash show -p` — the full patch (including untracked files). */
+/** The well-known empty git tree object. */
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/**
+ * `git stash show -p` — the full patch (including untracked files).
+ *
+ * When `file` is provided, `git stash show` cannot filter by pathspec (it
+ * errors with "Too many revisions specified"). Instead we resolve the stash to
+ * a commit SHA and use `git diff` against the stash commit's parents:
+ *   - Tracked changes (staged + unstaged merged in the worktree tree W) are
+ *     diffed against the base commit W^1.
+ *   - Untracked files live only in W^3; they're diffed against the empty tree.
+ * This produces the same content as the full patch, just scoped to one path.
+ */
 export async function stashShowPatch(
   opts: GitOpts & { ref: string; file?: string }
 ): Promise<string> {
-  const args = ["stash", "show", "-p", "-u", "--textconv", opts.ref];
-  if (opts.file) args.push("--", opts.file);
-  const result = await runGit(opts.cwd, args, opts.exec);
-  return result.stdout;
+  if (!opts.file) {
+    const args = ["stash", "show", "-p", "-u", "--textconv", opts.ref];
+    const result = await runGit(opts.cwd, args, opts.exec);
+    return result.stdout;
+  }
+
+  const sha = await gitRevParse(opts, opts.ref);
+  const exec = opts.exec ?? defaultExec;
+
+  // Tracked changes: diff the stash commit (W) against its first parent (base).
+  const tracked = await exec("git", ["diff", `${sha}^1`, sha, "--", opts.file], {
+    cwd: opts.cwd,
+  });
+  if (tracked.stdout.length > 0) return tracked.stdout;
+
+  // Untracked files live in ^3 (the untracked root commit).
+  const untrackedRoot = await gitRevParseOpt(opts, `${sha}^3`);
+  if (untrackedRoot) {
+    const result = await exec(
+      "git",
+      ["diff", EMPTY_TREE, untrackedRoot, "--", opts.file],
+      { cwd: opts.cwd }
+    );
+    return result.stdout;
+  }
+  return tracked.stdout;
 }
 
 /**

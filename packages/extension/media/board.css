@@ -144,6 +144,7 @@ body {
 .dot.untracked{ background: #569cd6; }
 .dot.tracked  { background: #dcdcaa; }
 .dot.index    { background: #4ec9b0; }
+.dot.mixed    { background: #d39c60; }
 
 .card .name {
   flex: 1 1 auto;

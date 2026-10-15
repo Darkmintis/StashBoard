@@ -8,8 +8,15 @@ import {
   classifyPath,
   collectWorkingTreeState,
   isInsideRepo,
+  stashFileEntries,
 } from "@stashboard/core";
 import { fileDiffUri, previewUri, StashContentProvider } from "./stashContentProvider";
+import {
+  StashDecorationProvider,
+  scmResourceUri,
+  statusLetter,
+  statusTooltip,
+} from "./statusDecorations";
 
 interface GitRepository {
   rootUri: vscode.Uri;
@@ -19,6 +26,7 @@ interface GitRepository {
 interface GitExtensionApi {
   getRepository(uri: vscode.Uri): GitRepository | undefined;
   repositories: GitRepository[];
+  onDidOpenRepository?: vscode.Event<GitRepository>;
 }
 
 interface GitExtension {
@@ -37,9 +45,11 @@ export class StashBoardSCM implements vscode.Disposable {
   private gitApi: GitExtensionApi | undefined;
   private refreshTimer: NodeJS.Timeout | undefined;
   private stashWarningShown = false;
+  private decorations: StashDecorationProvider | undefined;
 
   async activate(_context: vscode.ExtensionContext): Promise<void> {
     StashContentProvider.register(_context);
+    this.decorations = StashDecorationProvider.register(_context);
     try {
       const ext = vscode.extensions.getExtension<GitExtension>("vscode.git");
       if (ext) {
@@ -50,8 +60,12 @@ export class StashBoardSCM implements vscode.Disposable {
       this.gitApi = undefined;
     }
 
+    this.hookGitRepos();
+
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.scheduleRefresh()),
+      vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh()),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.scheduleRefresh()),
       vscode.commands.registerCommand("stashboard.save", (uri, selected) =>
         this.cmdSave(uri, selected)
       ),
@@ -60,13 +74,31 @@ export class StashBoardSCM implements vscode.Disposable {
       vscode.commands.registerCommand("stashboard.preview", (arg) => this.cmdPreview(arg)),
       vscode.commands.registerCommand("stashboard.rename", (arg) => this.cmdRename(arg)),
       vscode.commands.registerCommand("stashboard.delete", (arg) => this.cmdDelete(arg)),
-      vscode.commands.registerCommand("stashboard.openFile", (stashId, file) =>
-        this.cmdOpenFile(stashId, file)
-      ),
+      vscode.commands.registerCommand("stashboard.openFile", (stashId, file) => {
+        if (stashId && typeof stashId === "object" && "stashId" in stashId && "file" in stashId) {
+          const item = stashId as { stashId: string; file: string };
+          return this.cmdOpenFile(item.stashId, item.file);
+        }
+        return this.cmdOpenFile(stashId, file);
+      }),
       vscode.commands.registerCommand("stashboard.refresh", () => this.refresh())
     );
 
     await this.refresh();
+  }
+
+  private hookGitRepos(): void {
+    if (!this.gitApi) return;
+    const api = this.gitApi as GitExtensionApi & {
+      onDidOpenRepository?: vscode.Event<GitRepository>;
+    };
+    const watch = (repo: GitRepository) => {
+      this.disposables.push(repo.state.onDidChange(() => this.scheduleRefresh()));
+    };
+    for (const repo of api.repositories) watch(repo);
+    if (api.onDidOpenRepository) {
+      this.disposables.push(api.onDidOpenRepository(watch));
+    }
   }
 
   dispose(): void {
@@ -128,10 +160,29 @@ export class StashBoardSCM implements vscode.Disposable {
           this.groups.set(stash.id, group);
         }
         group.label = label;
-        group.resourceStates = stash.files.map((file) => {
+
+        let entries: { path: string; status: string }[] = [];
+        try {
+          const ref = await this.service!.getStashRef(stash.id);
+          entries = await stashFileEntries({ cwd: repo, ref });
+        } catch {
+          entries = stash.files.map((file) => ({ path: file, status: "M" }));
+        }
+        // Deduplicate rename pairs (old+new) by path, last status wins.
+        const byPath = new Map<string, string>();
+        for (const e of entries) byPath.set(e.path, e.status);
+
+        group.resourceStates = [...byPath.entries()].map(([file, status]) => {
+          const letter = statusLetter(status);
+          const tip = statusTooltip(letter);
           const state: vscode.SourceControlResourceState = {
-            resourceUri: vscode.Uri.file(path.join(repo, file)),
+            resourceUri: scmResourceUri(stash.id, file, letter),
             contextValue: "stashboardStashFile",
+            decorations: {
+              tooltip: tip,
+              strikeThrough: letter === "D",
+              faded: letter === "D",
+            },
             command: {
               command: "stashboard.openFile",
               title: "Open in Stash",
@@ -141,6 +192,7 @@ export class StashBoardSCM implements vscode.Disposable {
           return state;
         });
       }
+      this.decorations?.refresh();
     } finally {
       void vscode.commands.executeCommand("stashboard.boardSync");
     }
@@ -149,7 +201,8 @@ export class StashBoardSCM implements vscode.Disposable {
   private ensureScm(): void {
     if (this.scm) return;
     const scm = vscode.scm.createSourceControl("stashboard", "StashBoard");
-    scm.inputBox.placeholder = "Stash name — type a name and press Enter to save ALL changes";
+    // {0} is replaced by VS Code with the scm.acceptInput binding (Ctrl+Enter / Cmd+Enter).
+    scm.inputBox.placeholder = "Stash name ({0} to save all)";
     scm.acceptInputCommand = {
       command: "stashboard.saveAll",
       title: "Save All Changes to Stash",
@@ -423,7 +476,8 @@ export class StashBoardSCM implements vscode.Disposable {
   private async resolveTarget(arg?: unknown): Promise<string | undefined> {
     if (typeof arg === "string" && arg.length > 0) return arg;
     if (arg && typeof arg === "object") {
-      const candidate = arg as { id?: unknown };
+      const candidate = arg as { id?: unknown; stashId?: unknown };
+      if (typeof candidate.stashId === "string") return candidate.stashId;
       if (typeof candidate.id === "string") return candidate.id;
     }
     const stashes = await this.requireService().listStashes();

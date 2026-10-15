@@ -1,4 +1,4 @@
-// Stash Board webview. Renders host state only — no optimistic UI.
+// Stash Board webview. Renders host state only - no optimistic UI.
 // Failed drops snap back when the next state message arrives.
 
 // @ts-ignore -- provided by VS Code in the webview context
@@ -36,10 +36,14 @@ function render() {
 
   const sub = document.getElementById("subtitle");
   const newBtn = document.getElementById("newStash");
+  const stashChanges = document.getElementById("stashChanges");
+  const addStash = document.getElementById("addStash");
 
   if (!state.view) {
     sub.textContent = "";
     newBtn.disabled = true;
+    stashChanges.disabled = true;
+    addStash.disabled = true;
     clearBoard();
     return;
   }
@@ -56,8 +60,11 @@ function render() {
   sub.textContent =
     totalChanges === 0 && stashes.length === 0
       ? "No changes yet"
-      : `${totalChanges} working · ${stashes.length} stash${stashes.length === 1 ? "" : "es"}`;
-  newBtn.disabled = !!state.busy || totalChanges === 0;
+      : `${totalChanges} working - ${stashes.length} stash${stashes.length === 1 ? "" : "es"}`;
+  const canCreate = !state.busy && totalChanges > 0;
+  newBtn.disabled = !canCreate;
+  stashChanges.disabled = !canCreate;
+  addStash.disabled = !!state.busy;
 
   renderCards("#col-staged .cards", staged);
   renderCards("#col-changes .cards", changed);
@@ -109,11 +116,11 @@ function renderStashes(stashes) {
 
   const dropNew = el(box, "div", "new-stash");
   dropNew.dataset.newStash = "1";
-  dropNew.textContent = "+ New stash — drop a file here";
+  dropNew.textContent = "+ New stash - drop a file here";
   makeDropTarget(dropNew);
 
   if (stashes.length === 0) {
-    el(box, "div", "empty", "No stashes yet. Drag a file onto + New, or click New stash.");
+    el(box, "div", "empty", "No stashes yet. Drag a file onto + New, or click + New stash.");
     return;
   }
 
@@ -124,6 +131,13 @@ function renderStashes(stashes) {
     const head = el(card, "div", "stash-head");
     el(head, "span", "dot tracked");
     el(head, "span", "name", `${s.name} (${s.files.length})`);
+    const del = el(head, "button", "icon-btn danger", "x");
+    del.type = "button";
+    del.title = "Delete stash";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      post({ type: "delete", stashId: s.id });
+    });
 
     const actions = el(card, "div", "stash-actions");
     actionBtn(actions, "Restore", () => post({ type: "restoreStash", stashId: s.id }));
@@ -197,39 +211,32 @@ function dropAction(target) {
   const column = target.closest(".column");
   const targetColumn = column?.dataset.column;
 
-  // Change → STAGED
   if (dragData.kind === "change" && targetColumn === "staged") {
     if (dragData.state === "staged") return null;
     return { type: "stage", path: dragData.path };
   }
 
-  // Staged change → CHANGES (unstage)
   if (dragData.kind === "change" && targetColumn === "changes") {
     if (dragData.state !== "staged") return null;
     return { type: "unstage", path: dragData.path };
   }
 
-  // Change → + New stash zone (or empty STASHES column)
   if (dragData.kind === "change" && (newZone || (targetColumn === "stashes" && !stashCard))) {
     return { type: "create", paths: [dragData.path] };
   }
 
-  // Change → existing stash
   if (dragData.kind === "change" && stashCard) {
     return { type: "add", stashId: stashCard.dataset.stashId, path: dragData.path };
   }
 
-  // Stash file → CHANGES
   if (dragData.kind === "stashfile" && targetColumn === "changes") {
     return { type: "restore", stashId: dragData.stashId, path: dragData.path, staged: false };
   }
 
-  // Stash file → STAGED
   if (dragData.kind === "stashfile" && targetColumn === "staged") {
     return { type: "restore", stashId: dragData.stashId, path: dragData.path, staged: true };
   }
 
-  // Stash file → another stash
   if (dragData.kind === "stashfile" && stashCard) {
     const toId = stashCard.dataset.stashId;
     if (toId === dragData.stashId) return null;
@@ -267,5 +274,6 @@ for (const col of document.querySelectorAll(".column")) {
 
 document.getElementById("refresh").addEventListener("click", () => post({ type: "refresh" }));
 document.getElementById("newStash").addEventListener("click", () => post({ type: "createAll" }));
-document.getElementById("openPanel").addEventListener("click", () => post({ type: "openPanel" }));
+document.getElementById("stashChanges").addEventListener("click", () => post({ type: "createAll" }));
+document.getElementById("addStash").addEventListener("click", () => post({ type: "createAll" }));
 post({ type: "init" });

@@ -15,9 +15,11 @@ entry — inspectable any time with `git stash list`.
 ## Quick start
 
 1. Open a git workspace.
-2. Click the StashBoard icon in the activity bar, or run **StashBoard: Open Board**.
-3. Drag a changed file onto **+ New stash**, name it, done.
-4. Drag files between **Staged**, **Changes**, and stash cards to move work.
+2. Click the StashBoard icon in the activity bar for the stash list, then
+   **Open Board** (or run **StashBoard: Open Board**) to open the board in the editor.
+3. In Source Control, type a stash name under StashBoard and press **Ctrl+Enter**
+   (Cmd+Enter on macOS) to save all changes.
+4. Drag a changed file onto **+ New stash**, or use the **+** buttons on the board.
 
 | Drag | Result |
 | --- | --- |

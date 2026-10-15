@@ -14,22 +14,20 @@ import {
 } from "@stashboard/core";
 import { fileDiffUri } from "../stashContentProvider";
 
-const VIEW_TYPE = "stashboard.board";
 const PANEL_TYPE = "stashboard.boardPanel";
+const REFRESH_DEBOUNCE_MS = 400;
 
 /**
- * Stash Board — activity-bar webview + full editor panel (Apilot-style).
- * The webview never mutates optimistically; it only renders state we post back.
+ * Stash Board editor panel (Apilot-style). Sidebar is a stash tree; this panel
+ * is the drag-and-drop board. Never mutates the webview optimistically.
  */
-export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable {
-  static viewType = VIEW_TYPE;
-
+export class BoardPanel implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
-  private view: vscode.WebviewView | undefined;
   private panel: vscode.WebviewPanel | undefined;
   private service: StashService | undefined;
   private repoPath: string | undefined;
   private busy = false;
+  private refreshTimer: NodeJS.Timeout | undefined;
   private log = vscode.window.createOutputChannel("StashBoard Board");
 
   constructor(private readonly context: vscode.ExtensionContext) {}
@@ -37,20 +35,20 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
   static register(context: vscode.ExtensionContext): BoardPanel {
     const board = new BoardPanel(context);
     context.subscriptions.push(
-      vscode.window.registerWebviewViewProvider(VIEW_TYPE, board, {
-        webviewOptions: { retainContextWhenHidden: true },
-      }),
       vscode.commands.registerCommand("stashboard.openBoard", () => board.openPanel()),
-      vscode.commands.registerCommand("stashboard.focusSidebar", () =>
-        vscode.commands.executeCommand(`${VIEW_TYPE}.focus`)
-      ),
-      // SCM sidebar calls this after its own refresh so both surfaces stay in sync.
-      vscode.commands.registerCommand("stashboard.boardSync", () => void board.refresh())
+      vscode.window.registerWebviewPanelSerializer(PANEL_TYPE, {
+        deserializeWebviewPanel: async (panel) => {
+          board.attachPanel(panel);
+          void board.refresh();
+        },
+      })
     );
+    board.watchWorkspace();
     return board;
   }
 
   dispose(): void {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
     this.panel?.dispose();
@@ -58,26 +56,51 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
     this.log.dispose();
   }
 
-  /** Open (or reveal) the full editor panel — primary board surface. */
+  /** Called from SCM refresh so an open board stays current. */
+  sync(): void {
+    if (!this.panel) return;
+    this.scheduleRefresh();
+  }
+
+  /** Prompt + save all changes (sidebar + button). */
+  async createAll(): Promise<void> {
+    await this.ensureService();
+    await this.cmdCreateAll();
+  }
+
   openPanel(): void {
     if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.Beside);
+      this.panel.reveal(vscode.ViewColumn.Active);
       void this.refresh();
       return;
     }
     const panel = vscode.window.createWebviewPanel(
       PANEL_TYPE,
       "Stash Board",
-      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
+      { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media")],
       }
     );
-    panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "assets", "icon.png");
+    this.attachPanel(panel);
+    void this.refresh();
+  }
+
+  private attachPanel(panel: vscode.WebviewPanel): void {
     this.panel = panel;
-    this.wireWebview(panel.webview);
+    panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "assets", "icon.png");
+    panel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media")],
+    };
+    panel.webview.html = this.renderHtml(panel.webview);
+    panel.webview.onDidReceiveMessage(
+      (msg) => void this.handleMessage(msg),
+      undefined,
+      this.disposables
+    );
     panel.onDidDispose(
       () => {
         this.panel = undefined;
@@ -85,51 +108,43 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
       undefined,
       this.disposables
     );
-    void this.refresh();
   }
 
-  resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext<unknown>,
-    _token: vscode.CancellationToken
-  ): void {
-    this.view = webviewView;
-    webviewView.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, "media"),
-      ],
-    };
-    this.wireWebview(webviewView.webview);
-    webviewView.onDidDispose(
-      () => {
-        this.view = undefined;
-      },
-      undefined,
-      this.disposables
+  private watchWorkspace(): void {
+    this.disposables.push(
+      vscode.window.onDidChangeActiveTextEditor(() => this.scheduleRefresh()),
+      vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh()),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.scheduleRefresh())
     );
+    void this.hookGit();
+  }
 
-    if (!this.disposables.some((d) => (d as { __sbRefresh?: boolean }).__sbRefresh)) {
-      const sub = vscode.window.onDidChangeActiveTextEditor(() => this.refresh());
-      (sub as { __sbRefresh?: boolean }).__sbRefresh = true;
-      this.disposables.push(sub);
+  private async hookGit(): Promise<void> {
+    try {
+      const ext = vscode.extensions.getExtension("vscode.git");
+      const api = ext ? (ext.isActive ? ext.exports : await ext.activate()) : undefined;
+      const gitApi = api?.getAPI?.(1);
+      if (!gitApi) return;
+      const watchRepo = (repo: { state: { onDidChange: vscode.Event<void> } }) => {
+        this.disposables.push(repo.state.onDidChange(() => this.scheduleRefresh()));
+      };
+      for (const repo of gitApi.repositories ?? []) watchRepo(repo);
+      if (typeof gitApi.onDidOpenRepository === "function") {
+        this.disposables.push(gitApi.onDidOpenRepository(watchRepo));
+      }
+    } catch {
+      // git extension optional
     }
-
-    void this.refresh();
   }
 
-  private wireWebview(webview: vscode.Webview): void {
-    webview.html = this.renderHtml(webview);
-    webview.onDidReceiveMessage(
-      (msg) => void this.handleMessage(msg),
-      undefined,
-      this.disposables
-    );
+  private scheduleRefresh(): void {
+    if (!this.panel) return;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      void this.refresh();
+    }, REFRESH_DEBOUNCE_MS);
   }
-
-  // ---------------------------------------------------------------------------
-  // Message handling
-  // ---------------------------------------------------------------------------
 
   private async handleMessage(msg: unknown): Promise<void> {
     const type =
@@ -198,9 +213,6 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
       case "openFile":
         await this.cmdOpenFile(requireString(msg, "stashId"), requirePath(msg, "path"));
         break;
-      case "openPanel":
-        this.openPanel();
-        break;
       default:
         this.post({ type: "state", busy: this.busy, view: null, error: `Unknown message: ${type}` });
     }
@@ -227,8 +239,9 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
   }
 
   private async cmdCreateAll(): Promise<void> {
+    await this.ensureService();
     if (!this.service || !this.repoPath) {
-      await this.refresh("No git repository found in this workspace.");
+      vscode.window.showWarningMessage("No git repository found in this workspace.");
       return;
     }
     const name = await vscode.window.showInputBox({
@@ -283,7 +296,7 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
         : await this.requireService().restore(stashId);
       this.log.appendLine(`[ok] ${stage ? "stageStash" : "restoreStash"}`);
       vscode.window.showInformationMessage(
-        `${stage ? "Staged" : "Restored"} "${stashId}" — ${result.files.length} files.`
+        `${stage ? "Staged" : "Restored"} "${stashId}" - ${result.files.length} files.`
       );
     } catch (err) {
       await this.handleRestoreError(stashId, err);
@@ -309,7 +322,7 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
       try {
         await this.requireService().delete(id);
         vscode.window.showInformationMessage(
-          "Conflicts resolved — stash dropped. Your working tree keeps the changes."
+          "Conflicts resolved - stash dropped. Your working tree keeps the changes."
         );
       } catch (e) {
         vscode.window.showErrorMessage(this.describeError(e));
@@ -326,10 +339,6 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
     }
   }
 
-  /**
-   * Run a board operation with a loading lock. Failed drops snap back because
-   * the webview only renders host state.
-   */
   private async run(op: string, operation: () => Promise<void>): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -349,7 +358,7 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
   }
 
   private async refresh(error?: string): Promise<void> {
-    if (!this.view && !this.panel) return;
+    if (!this.panel) return;
     const repo = await this.resolveRepo();
     if (!repo) {
       this.post({
@@ -378,13 +387,8 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
   }
 
   private post(msg: unknown): void {
-    this.view?.webview.postMessage(msg);
     this.panel?.webview.postMessage(msg);
   }
-
-  // ---------------------------------------------------------------------------
-  // Webview helpers
-  // ---------------------------------------------------------------------------
 
   private renderHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
@@ -422,6 +426,7 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
   }
 
   private async cmdOpenFile(stashId: string, file: string): Promise<void> {
+    await this.ensureService();
     const service = this.requireService();
     try {
       const ref = await service.getStashRef(stashId);
@@ -431,6 +436,14 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
     } catch (err) {
       vscode.window.showErrorMessage(this.describeError(err));
     }
+  }
+
+  private async ensureService(): Promise<void> {
+    if (this.service && this.repoPath) return;
+    const repo = await this.resolveRepo();
+    if (!repo) return;
+    this.repoPath = repo;
+    this.service = new StashService({ cwd: repo });
   }
 
   private requireService(): StashService {
@@ -460,7 +473,7 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
         }
       }
     } catch {
-      // fall through to the git-directory probe below
+      // fall through
     }
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
       try {
@@ -468,7 +481,7 @@ export class BoardPanel implements vscode.WebviewViewProvider, vscode.Disposable
           return folder.uri.fsPath;
         }
       } catch {
-        // not a repo — try the next folder
+        // not a repo
       }
     }
     return undefined;

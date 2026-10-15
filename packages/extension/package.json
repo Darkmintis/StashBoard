@@ -1,7 +1,7 @@
 {
   "name": "stashboard",
   "displayName": "StashBoard",
-  "description": "Named, safe stashes for your unfinished git work. Save changes aside, browse them on a drag-and-drop board, and restore them — built on git stash.",
+  "description": "Named, safe stashes for your unfinished git work. Save changes aside, browse them on a drag-and-drop board, and restore them - built on git stash.",
   "version": "0.1.0",
   "publisher": "darkmintis",
   "license": "MIT",
@@ -44,14 +44,25 @@
     "views": {
       "stashboard": [
         {
-          "type": "webview",
-          "id": "stashboard.board",
-          "name": "Stash Board",
+          "id": "stashboard.stashes",
+          "name": "Stashes",
           "icon": "assets/stashboard.svg",
-          "contextualTitle": "Stash Board"
+          "contextualTitle": "Stashes"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "stashboard.stashes",
+        "contents": "Park unfinished work in named git stashes.\n[Open Board](command:stashboard.openBoard)\n[New Stash](command:stashboard.newStash)",
+        "when": "workbenchState != empty"
+      },
+      {
+        "view": "stashboard.stashes",
+        "contents": "Open a folder to use StashBoard.\n[Open Folder](command:workbench.action.files.openFolder)",
+        "when": "workbenchState == empty"
+      }
+    ],
     "commands": [
       {
         "command": "stashboard.openBoard",
@@ -60,9 +71,16 @@
         "icon": "$(window)"
       },
       {
-        "command": "stashboard.focusSidebar",
-        "title": "Focus Sidebar Board",
-        "category": "StashBoard"
+        "command": "stashboard.newStash",
+        "title": "New Stash",
+        "category": "StashBoard",
+        "icon": "$(add)"
+      },
+      {
+        "command": "stashboard.deleteStash",
+        "title": "Delete Stash",
+        "category": "StashBoard",
+        "icon": "$(trash)"
       },
       {
         "command": "stashboard.save",
@@ -115,13 +133,50 @@
       "view/title": [
         {
           "command": "stashboard.openBoard",
-          "when": "view == stashboard.board",
+          "when": "view == stashboard.stashes",
           "group": "navigation@1"
         },
         {
-          "command": "stashboard.refresh",
-          "when": "view == stashboard.board",
+          "command": "stashboard.newStash",
+          "when": "view == stashboard.stashes",
           "group": "navigation@2"
+        },
+        {
+          "command": "stashboard.refresh",
+          "when": "view == stashboard.stashes",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "stashboard.restore",
+          "when": "view == stashboard.stashes && viewItem == stashboardStash",
+          "group": "1_stashboard@1"
+        },
+        {
+          "command": "stashboard.stage",
+          "when": "view == stashboard.stashes && viewItem == stashboardStash",
+          "group": "1_stashboard@2"
+        },
+        {
+          "command": "stashboard.rename",
+          "when": "view == stashboard.stashes && viewItem == stashboardStash",
+          "group": "2_stashboard@1"
+        },
+        {
+          "command": "stashboard.deleteStash",
+          "when": "view == stashboard.stashes && viewItem == stashboardStash",
+          "group": "inline@1"
+        },
+        {
+          "command": "stashboard.delete",
+          "when": "view == stashboard.stashes && viewItem == stashboardStash",
+          "group": "3_stashboard@1"
+        },
+        {
+          "command": "stashboard.openFile",
+          "when": "view == stashboard.stashes && viewItem == stashboardStashFile",
+          "group": "inline@1"
         }
       ],
       "scm/sourceControl": [
@@ -176,7 +231,7 @@
           "when": "false"
         },
         {
-          "command": "stashboard.focusSidebar",
+          "command": "stashboard.deleteStash",
           "when": "false"
         }
       ]

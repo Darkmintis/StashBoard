@@ -128,21 +128,25 @@ button.link.danger:hover:not(:disabled) { color: var(--bad); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
 
-/* Board grid — stacks in the narrow activity-bar view */
+/* Board grid - editor panel is wide enough for three columns */
 #board {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr 1.2fr;
   gap: 8px;
   padding: 10px 12px;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
-@media (min-width: 520px) {
-  #board { grid-template-columns: 1fr 1fr 1.2fr; overflow: hidden; }
-  #board .column { min-height: 0; }
-  #board .cards { overflow-y: auto; }
+#board .column { min-height: 0; }
+#board .cards { overflow-y: auto; }
+
+@media (max-width: 720px) {
+  #board {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
 }
 
 .column {
@@ -173,6 +177,32 @@ button.link.danger:hover:not(:disabled) { color: var(--bad); }
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
+
+.col-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-btn {
+  min-height: 0;
+  min-width: 22px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.icon-btn.danger:hover:not(:disabled) { color: var(--bad); }
 
 .count {
   min-width: 18px;
@@ -259,6 +289,7 @@ button.link.danger:hover:not(:disabled) { color: var(--bad); }
   gap: 6px;
   min-width: 0;
 }
+.stash-head .icon-btn { margin-left: auto; }
 .stash-head .name {
   font-weight: 600;
   font-family: inherit;

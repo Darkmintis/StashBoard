@@ -70,8 +70,9 @@ git stashboard drop "Auth Refactor"            # confirmation prompt unless --ye
 
 ### Stash Board (drag & drop panel)
 
-Open **StashBoard: Open Board** for the full editor panel, or use the activity-bar
-**Stash Board** view. Three drop columns:
+The activity bar lists your stashes (like a folder tree). Open the board in the
+editor with **StashBoard: Open Board** (or the window icon on the Stashes view).
+Three drop columns:
 
 - **Staged** — files staged in the index.
 - **Changes** — unstaged and untracked working-tree files.
